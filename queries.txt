@@ -1,0 +1,97 @@
+show tables;
+
+desc user;
+desc class;
+desc coach;
+desc train;
+desc pax_info;
+desc payment_info;
+desc notifications;
+desc refund;
+desc seat;
+desc cancellation_history;
+desc station;
+desc zone;
+desc via_details;
+
+
+select* from user;
+select* from train;
+select* from via_details;
+select* from zone;
+select* from class;
+select* from station;
+
+
+----LOGIN---
+CALL login_register('neha.gupta@gmail.com', 'neha123', 'Neha Gupta', '9876543213', 35, 'F', '1990-11-05');
+
+
+---BOOK TICKET---
+select book_train_ticket("amitsharma","Amit Sharma","M",32,"2025-04-17","NDLS","HWH","12301/1A",12301,NULL,NULL,0);
+select* from pax_info;
+
+select book_train_ticket("priyapatel","Priya Patel","F",28,"2025-04-17","NDLS","HWH","12301/1A",12301,NULL,"VEG",0);
+select* from pax_info;
+
+select book_train_ticket("deepareddy","Deepa Reddy","F",28,"2025-04-17","NDLS","HWH","12301/1A",12301,"LB",NULL,0);
+select* from pax_info;
+
+select book_train_ticket("vijayy","Vijay Yadav","M",52,"2025-04-17","NDLS","HWH","12301/1A",12301,NULL,NULL,1);
+select* from pax_info;
+
+--concession--
+select book_train_ticket("geetadevi","Geeta Devi","F",72,"2025-04-17","NDLS","HWH","12301/1A",12301,NULL,NULL,0);
+select* from pax_info;
+
+select* from payment_info;
+select* from seat;
+select* from coach;
+
+
+----CANCEL TICEKT---
+call cancel_ticket( 1212515842);
+select* from notifications;
+select* from refund;
+select* from seat;
+
+----ZONE----
+SELECT 
+    zone_id, 
+    COUNT(*) AS number_of_stations,
+    GROUP_CONCAT(name ORDER BY name SEPARATOR ', ') AS stations
+FROM station
+GROUP BY zone_id
+ORDER BY zone_id;
+
+
+
+---QUERY 1----
+call track_pnr_status(1212515249);
+
+---QUERY 2---
+call track_train_by_number(12301,'2025-04-14');
+
+---QUERY 3---
+select get_available_seats(12301,"1A","2025-04-17");
+
+---QUERY 4----
+ select* from pax_info where train_number=12301 and date='2025-04-17';
+
+---QUERY 5---
+ call get_waitlisted_passengers(12301);
+
+---QUERY 6----
+ select get_train_cancellation_refunds(12301,'2025-04-17');
+
+---QUERY 7---
+select calculate_total_revenue('2025-04-13','2025-04-17',12301);
+
+---QUERY 8---
+select* from cancellation_history;
+
+---QUERY 9---
+call busiest_route('2025-04-17');
+
+---QUERY 10---
+select* from ticket_bill_view where pnr=1212515379;

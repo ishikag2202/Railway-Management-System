@@ -1,0 +1,176 @@
+mysql> select count(*) as total_users from user;
++-------------+
+| total_users |
++-------------+
+|          23 |
++-------------+
+1 row in set (0.02 sec)
+
+
+mysql> SELECT
+    ->     COUNT(*) AS total_trains,
+    ->     COUNT(DISTINCT start_station_code) AS unique_start_stations,
+    ->     COUNT(DISTINCT end_station_code) AS unique_end_stations,
+    ->     MIN(start_time) AS earliest_start_time,
+    ->     MAX(end_time) AS latest_end_time
+    -> FROM train;
++--------------+-----------------------+---------------------+---------------------+-----------------+
+| total_trains | unique_start_stations | unique_end_stations | earliest_start_time | latest_end_time |
++--------------+-----------------------+---------------------+---------------------+-----------------+
+|           30 |                    11 |                  19 | 06:15:00            | 17:40:00        |
++--------------+-----------------------+---------------------+---------------------+-----------------+
+1 row in set (0.02 sec)
+
+mysql> SELECT
+    ->     COUNT(*) AS total_passengers,
+    ->     COUNT(DISTINCT train_number) AS total_trains_booked,
+    ->     COUNT(DISTINCT from_station_code) AS unique_from_stations,
+    ->     COUNT(DISTINCT to_station_code) AS unique_to_stations,
+    ->     AVG(age) AS average_age,
+    ->     AVG(fare) AS average_fare,
+    ->     MIN(fare) AS min_fare,
+    ->     MAX(fare) AS max_fare,
+    ->     SUM(CASE WHEN gender = 'M' THEN 1 ELSE 0 END) AS total_male_passengers,
+    ->     SUM(CASE WHEN gender = 'F' THEN 1 ELSE 0 END) AS total_female_passengers,
+    ->     SUM(is_disabled) AS total_disabled_passengers,
+    ->     COUNT(DISTINCT payment_id) AS total_payments
+    -> FROM pax_info;
++------------------+---------------------+----------------------+--------------------+-------------+-------------------+----------+----------+-----------------------+-------------------------+---------------------------+----------------+
+| total_passengers | total_trains_booked | unique_from_stations | unique_to_stations | average_age | average_fare      | min_fare | max_fare | total_male_passengers | total_female_passengers | total_disabled_passengers | total_payments |
++------------------+---------------------+----------------------+--------------------+-------------+-------------------+----------+----------+-----------------------+-------------------------+---------------------------+----------------+
+|               54 |                   1 |                    1 |                  1 |     35.7778 | 4471.485185185185 |     1149 |     4796 |                    25 |                      29 |                         1 |             54 |
++------------------+---------------------+----------------------+--------------------+-------------+-------------------+----------+----------+-----------------------+-------------------------+---------------------------+----------------+
+1 row in set (0.00 sec)
+
+
+
+mysql> SELECT
+    ->     COUNT(*) AS total_payments,
+    ->     COUNT(DISTINCT username) AS unique_users,
+    ->     COUNT(DISTINCT pnr) AS unique_bookings,
+    ->     SUM(amount) AS total_amount_paid,
+    ->     AVG(amount) AS average_payment,
+    ->     MIN(amount) AS minimum_payment,
+    ->     MAX(amount) AS maximum_payment,
+    ->     COUNT(DISTINCT mode) AS payment_modes_used
+    -> FROM payment_info;
++----------------+--------------+-----------------+-------------------+-------------------+-----------------+-----------------+--------------------+
+| total_payments | unique_users | unique_bookings | total_amount_paid | average_payment   | minimum_payment | maximum_payment | payment_modes_used |
++----------------+--------------+-----------------+-------------------+-------------------+-----------------+-----------------+--------------------+
+|             54 |           23 |              54 |          241460.2 | 4471.485185185185 |            1149 |            4796 |                  1 |
++----------------+--------------+-----------------+-------------------+-------------------+-----------------+-----------------+--------------------+
+1 row in set (0.00 sec)
+
+
+mysql> SELECT
+    ->     COUNT(*) AS total_stations,
+    ->     COUNT(DISTINCT zone_id) AS unique_zones,
+    ->     SUM(number_of_platforms) AS total_platforms,
+    ->     AVG(number_of_platforms) AS average_platforms,
+    ->     MIN(number_of_platforms) AS min_platforms,
+    ->     MAX(number_of_platforms) AS max_platforms
+    -> FROM station;
++----------------+--------------+-----------------+-------------------+---------------+---------------+
+| total_stations | unique_zones | total_platforms | average_platforms | min_platforms | max_platforms |
++----------------+--------------+-----------------+-------------------+---------------+---------------+
+|             40 |           18 |             302 |            7.5500 |             3 |            23 |
++----------------+--------------+-----------------+-------------------+---------------+---------------+
+1 row in set (0.00 sec)
+
+mysql> SELECT
+    ->     COUNT(*) AS total_entries,
+    ->     COUNT(DISTINCT train_number) AS unique_trains,
+    ->     COUNT(DISTINCT station_code) AS unique_stations,
+    ->     AVG(dist_from_origin) AS avg_distance,
+    ->     MIN(dist_from_origin) AS min_distance,
+    ->     MAX(dist_from_origin) AS max_distance
+    -> FROM via_details;
++---------------+---------------+-----------------+--------------+--------------+--------------+
+| total_entries | unique_trains | unique_stations | avg_distance | min_distance | max_distance |
++---------------+---------------+-----------------+--------------+--------------+--------------+
+|           105 |            30 |              28 |     757.2476 |            0 |         3031 |
++---------------+---------------+-----------------+--------------+--------------+--------------+
+1 row in set (0.00 sec)
+
+
+mysql> SELECT
+    ->     COUNT(*) AS total_zones,
+    ->     COUNT(DISTINCT zone_id) AS unique_zone_ids,
+    ->     COUNT(DISTINCT zone_name) AS unique_zone_names
+    -> FROM zone;
++-------------+-----------------+-------------------+
+| total_zones | unique_zone_ids | unique_zone_names |
++-------------+-----------------+-------------------+
+|          18 |              18 |                18 |
++-------------+-----------------+-------------------+
+1 row in set (0.00 sec)
+
+
+mysql> SELECT
+    ->     COUNT(*) AS total_refunds,
+    ->     COUNT(DISTINCT pnr) AS unique_pnrs_refunded,
+    ->     SUM(amount) AS total_refund_amount,
+    ->     AVG(amount) AS average_refund,
+    ->     MIN(amount) AS minimum_refund,
+    ->     MAX(amount) AS maximum_refund
+    -> FROM refund;
++---------------+----------------------+---------------------+--------------------+----------------+----------------+
+| total_refunds | unique_pnrs_refunded | total_refund_amount | average_refund     | minimum_refund | maximum_refund |
++---------------+----------------------+---------------------+--------------------+----------------+----------------+
+|             3 |                    3 |              5974.8 | 1991.6000000000001 |         1378.8 |           2298 |
++---------------+----------------------+---------------------+--------------------+----------------+----------------+
+1 row in set (0.00 sec)
+
+
+mysql> SELECT
+    ->     COUNT(*) AS total_seats_allocated,
+    ->     COUNT(DISTINCT pnr) AS unique_bookings,
+    ->     COUNT(DISTINCT train_number) AS unique_trains,
+    ->     COUNT(DISTINCT class_code) AS unique_classes,
+    ->     COUNT(DISTINCT coach_number) AS unique_coaches,
+    ->
+    ->     MIN(seat_number) AS min_seat_number,
+    ->     MAX(seat_number) AS max_seat_number
+    -> FROM seat;
++-----------------------+-----------------+---------------+----------------+----------------+-----------------+-----------------+
+| total_seats_allocated | unique_bookings | unique_trains | unique_classes | unique_coaches | min_seat_number | max_seat_number |
++-----------------------+-----------------+---------------+----------------+----------------+-----------------+-----------------+
+|                    43 |              42 |             1 |              1 |              2 |               1 |              24 |
++-----------------------+-----------------+---------------+----------------+----------------+-----------------+-----------------+
+1 row in set (0.00 sec)
+
+
+mysql> SELECT
+    ->     COUNT(*) AS total_coaches,
+    ->     COUNT(DISTINCT train_number) AS unique_trains,
+    ->     COUNT(DISTINCT class_code) AS unique_classes,
+    ->     COUNT(DISTINCT coach_number) AS unique_coach_numbers
+    -> FROM coach;
++---------------+---------------+----------------+----------------------+
+| total_coaches | unique_trains | unique_classes | unique_coach_numbers |
++---------------+---------------+----------------+----------------------+
+|             2 |             1 |              1 |                    2 |
++---------------+---------------+----------------+----------------------+
+1 row in set (0.00 sec)
+
+
+mysql> SELECT
+    ->     COUNT(*) AS total_classes,
+    ->     AVG(number_of_coaches) AS avg_coaches,
+    ->     AVG(seats_per_coach) AS avg_seats_per_coach,
+    ->     MIN(number_of_coaches) AS min_coaches,
+    ->     MAX(number_of_coaches) AS max_coaches,
+    ->     MIN(seats_per_coach) AS min_seats_per_coach,
+    ->     MAX(seats_per_coach) AS max_seats_per_coach
+    -> FROM class;
++---------------+-------------+---------------------+-------------+-------------+---------------------+---------------------+
+| total_classes | avg_coaches | avg_seats_per_coach | min_coaches | max_coaches | min_seats_per_coach | max_seats_per_coach |
++---------------+-------------+---------------------+-------------+-------------+---------------------+---------------------+
+|           114 |      4.6053 |             64.2982 |           1 |          10 |                  24 |                 108 |
++---------------+-------------+---------------------+-------------+-------------+---------------------+---------------------+
+1 row in set (0.00 sec)
+
+
+
+
+

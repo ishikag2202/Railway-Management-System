@@ -1,0 +1,1194 @@
+-------------------------
+----LOGIN REGISTER-------
+--------------------------
+DELIMITER //
+
+DROP PROCEDURE IF EXISTS login_register //
+
+CREATE PROCEDURE login_register(
+
+    IN p_email_id VARCHAR(50),
+
+    IN p_password VARCHAR(255),
+
+    IN p_name VARCHAR(50),
+
+    IN p_mobile_number VARCHAR(20),
+
+    IN p_age INT,
+
+    IN p_gender CHAR,
+
+    IN p_dob DATE
+
+)
+
+BEGIN
+
+    DECLARE user_exists INT DEFAULT 0;
+
+    DECLARE valid_login INT DEFAULT 0;
+
+    
+
+    -- Check if user already exists
+
+    SELECT COUNT(*) INTO user_exists
+
+    FROM user
+
+    WHERE emial_id = p_email_id;
+
+    
+
+    IF user_exists > 0 THEN
+
+        -- User exists, attempt login
+
+        SELECT COUNT(*) INTO valid_login
+
+        FROM user
+
+        WHERE emial_id = p_email_id ;
+
+        
+
+        IF valid_login > 0 THEN
+
+            SELECT 'You have logged in!' AS message;
+
+        ELSE
+
+            SELECT 'Incorrect password. Please try again.' AS message;
+
+        END IF;
+
+    ELSE
+
+        -- User doesn't exist, register new user
+
+        IF p_name IS NULL OR p_name = '' THEN
+
+            SELECT 'Name is required for registration.' AS message;
+
+        ELSE
+
+            -- Generate username from email if not provided
+
+            SET @username = SUBSTRING_INDEX(p_email_id, '@', 1);
+
+            
+
+            -- Insert the new user
+
+            INSERT INTO user (emial_id, username, name, mobile_number, age, gender, dob, password)
+
+            VALUES (p_email_id, @username, p_name, p_mobile_number, p_age, p_gender, p_dob, p_password);
+
+            
+
+            SELECT 'Registration successful! You have logged in!' AS message;
+
+        END IF;
+
+    END IF;
+
+END //
+
+DELIMITER ;
+
+
+--------------------------------
+-----BOOK TICKET FUNCTION-------
+--------------------------------
+mysql> delimiter //
+CREATE FUNCTION book_train_ticket(
+    p_username VARCHAR(50),
+    p_name VARCHAR(50),
+    p_gender CHAR(1),
+    p_age INT,
+    p_travel_date DATE,
+    p_from_station_code VARCHAR(20),
+    p_to_station_code VARCHAR(20),
+    p_class_code VARCHAR(20),
+    p_train_number INT,
+    p_berth_preference VARCHAR(20),
+    p_meal_preference VARCHAR(10),
+    p_is_disabled TINYINT(1)
+)
+RETURNS VARCHAR(20)
+NOT DETERMINISTIC
+MODIFIES SQL DATA
+BEGIN
+    DECLARE v_pnr VARCHAR(20);
+    DECLARE v_total_seats INT;
+    DECLARE v_booked_seats INT;
+    DECLARE v_rac_count INT;
+    DECLARE v_wl_count INT;
+    DECLARE v_available_seats INT;
+    DECLARE v_confirmed_quota INT;
+    DECLARE v_rac_quota INT;
+    DECLARE v_current_status VARCHAR(20);
+    DECLARE v_seat_number INT;
+    DECLARE v_coach_number INT;
+    DECLARE v_fare DOUBLE;
+    DECLARE v_meal_charge DOUBLE DEFAULT 0;
+    DECLARE v_distance INT;
+    DECLARE v_payment_id VARCHAR(20);
+    DECLARE v_current_date DATE;
+    DECLARE v_discount_factor DOUBLE DEFAULT 1.0;
+    DECLARE v_class_factor DOUBLE;
+    DECLARE v_seat_found BOOLEAN DEFAULT FALSE;
+    DECLARE v_seats_per_coach INT;
+    DECLARE v_number_of_coaches INT;
+    DECLARE trimmed VARCHAR(10);
+
+    -- Get current date
+    SET v_current_date = CURDATE();
+
+    -- Create a unique PNR with a class code identifier
+    SET v_pnr = CONCAT(
+        LEFT(p_train_number, 2),
+        TRIM(LEFT(p_class_code, 1)),
+        DATE_FORMAT(v_current_date, '%y%d'),
+        LPAD(FLOOR(RAND() * 1000), 3, '0')
+    );
+
+    WHILE EXISTS (SELECT 1 FROM pax_info WHERE pnr = v_pnr) DO
+        SET v_pnr = CONCAT(
+            LEFT(p_train_number, 2),
+            TRIM(LEFT(p_class_code, 1)),
+            DATE_FORMAT(v_current_date, '%y%d'),
+            LPAD(FLOOR(RAND() * 1000), 3, '0')
+        );
+    END WHILE;
+
+    -- Generate unique payment_id using train_number and random number
+    SET v_payment_id = CONCAT(
+        p_train_number,
+        LPAD(FLOOR(RAND() * 10000), 4, '0')
+    );
+
+    -- Fetch class information (seats per coach and number of coaches)
+    SELECT
+        number_of_coaches,
+        seats_per_coach
+    INTO
+        v_number_of_coaches,
+        v_seats_per_coach
+    FROM class
+    WHERE train_number = p_train_number AND class_code = TRIM(p_class_code);
+
+    -- Calculate total seats based on class information
+    SET v_total_seats = v_number_of_coaches * v_seats_per_coach;
+
+    -- Get count of already booked seats for this train/date/class
+    SELECT COUNT(*) INTO v_booked_seats
+    FROM pax_info
+    WHERE train_number = p_train_number
+      AND date = p_travel_date
+      AND pnr LIKE CONCAT(LEFT(p_train_number, 2), TRIM(LEFT(p_class_code, 1)), '%')
+      AND status LIKE 'CNF%';
+
+    -- Get RAC and WL counts for this train/date/class
+    SELECT COUNT(*) INTO v_rac_count
+    FROM pax_info
+    WHERE train_number = p_train_number
+      AND date = p_travel_date
+      AND pnr LIKE CONCAT(LEFT(p_train_number, 2), TRIM(LEFT(p_class_code, 1)), '%')
+      AND status LIKE 'RAC%';
+
+    SELECT COUNT(*) INTO v_wl_count
+    FROM pax_info
+    WHERE train_number = p_train_number
+      AND date = p_travel_date
+      AND pnr LIKE CONCAT(LEFT(p_train_number, 2), TRIM(LEFT(p_class_code, 1)), '%')
+      AND status LIKE 'WL%';
+
+    -- Calculate availability and quotas
+    SET v_available_seats = v_total_seats - v_booked_seats;
+    SET v_confirmed_quota = FLOOR(v_total_seats * 0.9);
+    SET v_rac_quota = v_total_seats - v_confirmed_quota;
+
+    -- Create temporary table to track booked seats
+    CREATE TEMPORARY TABLE IF NOT EXISTS temp_booked_seats (
+        coach_number INT,
+        seat_number INT
+    );
+
+    DELETE FROM temp_booked_seats;
+
+    -- Extract seat information from confirmed bookings
+    INSERT INTO temp_booked_seats (coach_number, seat_number)
+    SELECT
+        CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(status, '/', 2), '/', -1) AS UNSIGNED) AS coach_number,
+        CAST(SUBSTRING_INDEX(status, '/', -1) AS UNSIGNED) AS seat_number
+    FROM pax_info
+    WHERE train_number = p_train_number
+      AND date = p_travel_date
+      AND pnr LIKE CONCAT(LEFT(p_train_number, 2), TRIM(LEFT(p_class_code, 1)), '%')
+      AND status LIKE 'CNF%';
+
+    -- Status assignment logic
+    IF v_booked_seats < v_confirmed_quota THEN
+        -- Try to find an appropriate seat
+        IF p_is_disabled = 1 THEN
+            SELECT c.coach_number, s.seat_number
+            INTO v_coach_number, v_seat_number
+            FROM seat s
+            JOIN coach c ON s.train_number = c.train_number AND s.class_code = c.class_code
+            LEFT JOIN temp_booked_seats b ON c.coach_number = b.coach_number AND s.seat_number = b.seat_number
+            WHERE s.train_number = p_train_number
+              AND s.class_code = TRIM(p_class_code)
+              AND s.seat_number % 3 = 0
+              AND b.seat_number IS NULL
+            ORDER BY c.coach_number, s.seat_number
+            LIMIT 1;
+
+            IF v_seat_number IS NOT NULL THEN
+                SET v_seat_found = TRUE;
+            END IF;
+
+        ELSEIF p_berth_preference IS NOT NULL AND p_berth_preference != '' THEN
+            SELECT c.coach_number, s.seat_number
+            INTO v_coach_number, v_seat_number
+            FROM seat s
+            JOIN coach c ON s.train_number = c.train_number AND s.class_code = c.class_code
+            LEFT JOIN temp_booked_seats b ON c.coach_number = b.coach_number AND s.seat_number = b.seat_number
+            WHERE s.train_number = p_train_number
+              AND s.class_code = TRIM(p_class_code)
+              AND (
+                  (p_berth_preference = 'LB' AND s.seat_number % 3 = 0) OR
+                  (p_berth_preference = 'MB' AND s.seat_number % 3 = 1) OR
+                  (p_berth_preference = 'UB' AND s.seat_number % 3 = 2)
+              )
+              AND b.seat_number IS NULL
+            ORDER BY c.coach_number, s.seat_number
+            LIMIT 1;
+
+            IF v_seat_number IS NOT NULL THEN
+                SET v_seat_found = TRUE;
+            END IF;
+        END IF;
+
+        -- If no preferred seat found, try any available seat
+        IF NOT v_seat_found THEN
+            SELECT c.coach_number, s.seat_number
+            INTO v_coach_number, v_seat_number
+            FROM seat s
+            JOIN coach c ON s.train_number = c.train_number AND s.class_code = c.class_code
+            LEFT JOIN temp_booked_seats b ON c.coach_number = b.coach_number AND s.seat_number = b.seat_number
+            WHERE s.train_number = p_train_number
+              AND s.class_code = TRIM(p_class_code)
+              AND b.seat_number IS NULL
+            ORDER BY c.coach_number, s.seat_number
+            LIMIT 1;
+
+            IF v_seat_number IS NOT NULL THEN
+                SET v_seat_found = TRUE;
+            END IF;
+        END IF;
+
+        -- Fallback to auto-assignment when no seat found in database
+        IF NOT v_seat_found AND v_available_seats > 0 THEN
+            SET v_coach_number = FLOOR(v_booked_seats / v_seats_per_coach) + 1;
+
+            IF v_coach_number <= v_number_of_coaches THEN
+                SET v_seat_number = (v_booked_seats % v_seats_per_coach) + 1;
+                SET v_seat_found = TRUE;
+            END IF;
+        END IF;
+
+        -- Set status based on seat assignment results
+        IF v_seat_found THEN
+            SET v_current_status = CONCAT('CNF/', v_coach_number, '/', v_seat_number);
+        ELSE
+            SET v_current_status = CONCAT('RAC/', (v_rac_count + 1));
+        END IF;
+    ELSEIF v_booked_seats >= v_confirmed_quota AND v_rac_count < v_rac_quota THEN
+        SET v_current_status = CONCAT('RAC/', (v_rac_count + 1));
+    ELSE
+        SET v_current_status = CONCAT('WL/', (v_wl_count + 1));
+    END IF;
+
+    -- Clean up
+    DROP TEMPORARY TABLE IF EXISTS temp_booked_seats;
+
+    -- Get distance from origin to destination
+    SELECT dist_from_origin INTO v_distance
+    FROM via_details
+    WHERE train_number = p_train_number AND station_code = p_to_station_code;
+
+    SET trimmed = SUBSTRING_INDEX(p_class_code, '/', -1);
+
+    -- Fare calculation based on class
+    CASE TRIM(trimmed)
+        WHEN '1A' THEN SET v_class_factor = 3.0;
+        WHEN '2A' THEN SET v_class_factor = 2.0;
+        WHEN 'SL' THEN SET v_class_factor = 1.0;
+        WHEN 'GN' THEN SET v_class_factor = 0.6;
+        ELSE SET v_class_factor = 1.5;
+    END CASE;
+
+    -- Add meal charges if applicable
+    IF p_meal_preference = 'VEG' THEN
+        SET v_meal_charge = 200.0;
+    ELSEIF p_meal_preference = 'NONVEG' THEN
+        SET v_meal_charge = 250.0;
+    END IF;
+
+    -- Apply discounts
+    IF p_is_disabled = 1 THEN
+        SET v_discount_factor = 0.25;
+    ELSEIF p_age >= 60 THEN
+        SET v_discount_factor = 0.6;
+    ELSEIF p_age < 10 THEN
+        SET v_discount_factor = 0.5;
+    END IF;
+
+    -- Calculate final fare
+    SET v_fare = (v_distance * v_class_factor) * v_discount_factor;
+
+    IF p_meal_preference IS NOT NULL AND p_meal_preference != '' THEN
+        SET v_fare = v_fare + v_meal_charge;
+    END IF;
+
+    -- First insert into payment_info WITHOUT the PNR field
+    INSERT INTO payment_info (username, amount, date, mode, payment_id)
+    VALUES (p_username, v_fare, v_current_date, 'ONLINE', v_payment_id);
+
+    -- Then insert into pax_info WITH the meal_preference, berth_preference, and is_disabled parameters
+    INSERT INTO pax_info (
+        pnr,
+        name,
+        gender,
+        age,
+        date,
+        fare,
+        status,
+        from_station_code,
+        to_station_code,
+        train_number,
+        payment_id,
+        meal_preference,
+        berth_preference,
+        is_disabled
+    )
+    VALUES (
+        v_pnr,
+        p_name,
+        p_gender,
+        p_age,
+        p_travel_date,
+        v_fare,
+        v_current_status,
+        p_from_station_code,
+        p_to_station_code,
+        p_train_number,
+        v_payment_id,
+        p_meal_preference,
+        p_berth_preference,
+        p_is_disabled
+    );
+
+    -- Now update payment_info to add the PNR
+    UPDATE payment_info
+    SET pnr = v_pnr
+    WHERE payment_id = v_payment_id;
+
+    -- Update coach and seat tables after pax_info insertion
+    IF v_seat_found THEN
+        -- Insert or update coach table
+        INSERT INTO coach (train_number, class_code, coach_number)
+        VALUES (p_train_number, TRIM(p_class_code), v_coach_number)
+        ON DUPLICATE KEY UPDATE coach_number = v_coach_number;
+
+        -- Insert or update seat table
+        INSERT INTO seat (train_number, class_code, coach_number, seat_number, pnr)
+        VALUES (p_train_number, TRIM(p_class_code), v_coach_number, v_seat_number, v_pnr)
+        ON DUPLICATE KEY UPDATE pnr = v_pnr;
+    END IF;
+
+    -- Return the PNR
+    RETURN v_pnr;
+END //
+
+--------------------------------
+-----CANCEL TICKET PROCEDURE----
+-------------------------------
+mysql> CREATE PROCEDURE cancel_ticket(IN p_pnr INT)
+    -> proc_label: BEGIN
+    ->     DECLARE v_fare DOUBLE;
+    ->     DECLARE v_travel_date DATE;
+    ->     DECLARE v_travel_time TIME;
+    ->     DECLARE v_current_datetime DATETIME;
+    ->     DECLARE v_hours_remaining DECIMAL(10,2);
+    ->     DECLARE v_refund_amount DOUBLE;
+    ->     DECLARE v_cancelled_seat_number INT;
+    ->     DECLARE v_train_number INT;
+    ->     DECLARE v_class_code VARCHAR(20);
+    ->     DECLARE v_coach_number VARCHAR(20);
+    ->     DECLARE v_seat_pnr INT;
+    ->     DECLARE v_pnr_exists INT DEFAULT 0;
+    ->     DECLARE v_payment_id INT;
+    ->
+    ->     -- Check if the PNR exists
+    ->     SELECT COUNT(*) INTO v_pnr_exists
+    ->     FROM pax_info
+    ->     WHERE pnr = p_pnr;
+    ->
+    ->     -- If PNR doesn't exist, return error message and exit
+    ->     IF v_pnr_exists = 0 THEN
+    ->         SELECT CONCAT('PNR ', p_pnr, ' does not exist or has already been deleted.') AS message;
+    ->         LEAVE proc_label;
+    ->     END IF;
+    ->
+    ->     -- Get train details and travel datetime for the PNR
+    ->     SELECT
+    ->         p.fare,
+    ->         p.date,
+    ->         t.start_time,
+    ->         p.train_number,
+    ->         p.payment_id
+    ->     INTO
+    ->         v_fare,
+    ->         v_travel_date,
+    ->         v_travel_time,
+    ->         v_train_number,
+    ->         v_payment_id
+    ->     FROM
+    ->         pax_info p
+    ->         JOIN train t ON p.train_number = t.train_number
+    ->     WHERE
+    ->         p.pnr = p_pnr
+    ->     LIMIT 1;
+    ->
+    ->     -- Get seat details if exists
+    ->     SELECT seat_number, coach_number, class_code INTO v_cancelled_seat_number, v_coach_number, v_class_code
+    ->     FROM seat
+    ->     WHERE pnr = p_pnr;
+    ->
+    ->     -- Get current datetime and calculate hours remaining
+    ->     SET v_current_datetime = NOW();
+    ->     SET v_hours_remaining = TIMESTAMPDIFF(HOUR, v_current_datetime,
+    ->                                       TIMESTAMP(v_travel_date, v_travel_time));
+    ->
+    ->     -- Calculate refund amount based on cancellation policy
+    ->     IF v_hours_remaining > 48 THEN
+    ->         -- More than 48 hours: 25% charge (minimum Rs. 120)
+    ->         SET v_refund_amount = v_fare * 0.75;
+    ->         IF (v_fare * 0.25) < 120 THEN
+    ->             SET v_refund_amount = v_fare - 120;
+    ->         END IF;
+    ->     ELSEIF v_hours_remaining >= 4 AND v_hours_remaining <= 48 THEN
+    ->         -- Between 4 and 48 hours: 50% charge
+    ->         SET v_refund_amount = v_fare * 0.5;
+    ->     ELSE
+    ->         -- Less than 4 hours: No refund
+    ->         SET v_refund_amount = 0;
+    ->     END IF;
+    ->
+    ->     -- Store the refund amount in a local variable to ensure it's available for output
+    ->     SET @refund_amount_to_report = v_refund_amount;
+    ->
+    ->     -- Start transaction to ensure data consistency
+    ->     START TRANSACTION;
+    ->
+    ->     -- First, update seat information and handle RAC/WL promotions
+    ->     -- Find the next RAC passenger to promote to confirmed if this is a confirmed ticket
+    ->     IF v_cancelled_seat_number IS NOT NULL THEN
+    ->         SELECT pnr INTO v_seat_pnr
+    ->         FROM pax_info
+    ->         WHERE train_number = v_train_number
+    ->         AND (
+    ->             (status LIKE 'RAC/%' AND CAST(SUBSTRING_INDEX(status, '/', -1) AS SIGNED) = 1)
+    ->             OR
+    ->             (status LIKE 'RAC%' AND status NOT LIKE 'RAC/%' AND CAST(REPLACE(status, 'RAC', '') AS SIGNED) = 1)
+    ->         )
+    ->         LIMIT 1;
+    ->
+    ->         IF v_seat_pnr IS NOT NULL THEN
+    ->             -- Update the RAC1 passenger to get the cancelled seat
+    ->             UPDATE seat
+    ->             SET pnr = v_seat_pnr
+    ->             WHERE train_number = v_train_number
+    ->             AND class_code = v_class_code
+    ->             AND seat_number = v_cancelled_seat_number;
+    ->
+    ->             -- Update status of the promoted passenger to 'CNF'
+    ->             UPDATE pax_info
+    ->             SET status = CONCAT('CNF/', v_coach_number, '/', v_cancelled_seat_number)
+    ->             WHERE pnr = v_seat_pnr;
+    ->         ELSE
+    ->             -- Delete the seat record if it wasn't reassigned
+    ->             DELETE FROM seat
+    ->             WHERE pnr = p_pnr;
+    ->         END IF;
+    ->     END IF;
+    ->
+    ->     -- Promote all remaining RAC passengers
+    ->     DROP TEMPORARY TABLE IF EXISTS temp_rac_updates;
+    ->     CREATE TEMPORARY TABLE temp_rac_updates AS
+    ->     SELECT
+    ->         pnr,
+    ->         CASE
+    ->             WHEN status LIKE 'RAC/%' THEN
+    ->                 CONCAT('RAC/', GREATEST(1, CAST(SUBSTRING_INDEX(status, '/', -1) AS SIGNED) - 1))
+    ->             WHEN status LIKE 'RAC%' THEN
+    ->                 CONCAT('RAC', GREATEST(1, CAST(REPLACE(status, 'RAC', '') AS SIGNED) - 1))
+    ->             ELSE status
+    ->         END AS new_status
+    ->     FROM pax_info
+    ->     WHERE train_number = v_train_number
+    ->     AND (
+    ->         (status LIKE 'RAC/%' AND CAST(SUBSTRING_INDEX(status, '/', -1) AS SIGNED) > 1)
+    ->         OR
+    ->         (status LIKE 'RAC%' AND status NOT LIKE 'RAC/%' AND CAST(REPLACE(status, 'RAC', '') AS SIGNED) > 1)
+    ->     );
+    ->
+    ->     -- Apply RAC updates
+    ->     UPDATE pax_info p
+    ->     JOIN temp_rac_updates t ON p.pnr = t.pnr
+    ->     SET p.status = t.new_status;
+    ->
+    ->     -- Find top waitlist passenger to promote to last RAC position
+    ->     SET @last_rac_number = 0;
+    ->
+    ->     SELECT MAX(
+    ->         CASE
+    ->             WHEN status LIKE 'RAC/%' THEN CAST(SUBSTRING_INDEX(status, '/', -1) AS SIGNED)
+    ->             WHEN status LIKE 'RAC%' AND status NOT LIKE 'RAC/%' THEN CAST(REPLACE(status, 'RAC', '') AS SIGNED)
+    ->             ELSE 0
+    ->         END
+    ->     ) INTO @last_rac_number
+    ->     FROM pax_info
+    ->     WHERE train_number = v_train_number
+    ->     AND (status LIKE 'RAC/%' OR (status LIKE 'RAC%' AND status NOT LIKE 'RAC/%'));
+    ->
+    ->     -- If there's no RAC, set to 0 to make next RAC position RAC1
+    ->     IF @last_rac_number IS NULL THEN
+    ->         SET @last_rac_number = 0;
+    ->     END IF;
+    ->
+    ->     -- Promote WL1 to last RAC position
+    ->     UPDATE pax_info
+    ->     SET status = CONCAT('RAC/', @last_rac_number + 1)
+    ->     WHERE train_number = v_train_number
+    ->     AND (
+    ->         (status LIKE 'WL/%' AND CAST(SUBSTRING_INDEX(status, '/', -1) AS SIGNED) = 1)
+    ->         OR
+    ->         (status LIKE 'WL%' AND status NOT LIKE 'WL/%' AND CAST(REPLACE(status, 'WL', '') AS SIGNED) = 1)
+    ->     );
+    ->
+    ->     -- Promote all waitlist passengers
+    ->     DROP TEMPORARY TABLE IF EXISTS temp_wl_updates;
+    ->     CREATE TEMPORARY TABLE temp_wl_updates AS
+    ->     SELECT
+    ->         pnr,
+    ->         CASE
+    ->             WHEN status LIKE 'WL/%' THEN
+    ->                 CONCAT('WL/', GREATEST(1, CAST(SUBSTRING_INDEX(status, '/', -1) AS SIGNED) - 1))
+    ->             WHEN status LIKE 'WL%' THEN
+    ->                 CONCAT('WL', GREATEST(1, CAST(REPLACE(status, 'WL', '') AS SIGNED) - 1))
+    ->             ELSE status
+    ->         END AS new_status
+    ->     FROM pax_info
+    ->     WHERE train_number = v_train_number
+    ->     AND (
+    ->         (status LIKE 'WL/%' AND CAST(SUBSTRING_INDEX(status, '/', -1) AS SIGNED) > 1)
+    ->         OR
+    ->         (status LIKE 'WL%' AND status NOT LIKE 'WL/%' AND CAST(REPLACE(status, 'WL', '') AS SIGNED) > 1)
+    ->     );
+    ->
+    ->     -- Apply waitlist updates
+    ->     UPDATE pax_info p
+    ->     JOIN temp_wl_updates t ON p.pnr = t.pnr
+    ->     SET p.status = t.new_status;
+    ->
+    ->     -- Insert into refund table with the PNR
+    ->     INSERT INTO refund (amount, pnr)
+    ->     VALUES (v_refund_amount, p_pnr);
+    ->
+    ->     -- Handle circular foreign key constraint:
+    ->     -- First, temporarily disable foreign key checks
+    ->     SET foreign_key_checks = 0;
+    ->
+    ->     -- Now we can delete from both tables without constraint issues
+    ->     DELETE FROM payment_info WHERE pnr = p_pnr;
+    ->     DELETE FROM pax_info WHERE pnr = p_pnr;
+    ->
+    ->     -- Re-enable foreign key checks
+    ->     SET foreign_key_checks = 1;
+    ->
+    ->     -- Drop temporary tables
+    ->     DROP TEMPORARY TABLE IF EXISTS temp_rac_updates;
+    ->     DROP TEMPORARY TABLE IF EXISTS temp_wl_updates;
+    ->
+    ->     -- Commit the transaction
+    ->     COMMIT;
+    ->
+    ->     -- Return success message with the refund amount
+    ->     SELECT CONCAT('Ticket with PNR ', p_pnr, ' cancelled successfully. Refund amount: Rs. ', @refund_amount_to_report) AS message;
+    -> END //
+Query OK, 0 rows affected (0.01 sec)
+
+
+
+-----------------------
+----TRACK PNR STATUS---
+-----------------------
+DELIMITER //
+
+CREATE PROCEDURE track_pnr_status(IN p_pnr VARCHAR(20))
+BEGIN
+    DECLARE v_name VARCHAR(30);
+    DECLARE v_train_number INT;
+    DECLARE v_train_name VARCHAR(50);
+    DECLARE v_from_station VARCHAR(20);
+    DECLARE v_to_station VARCHAR(20);
+    DECLARE v_from_station_name VARCHAR(30);
+    DECLARE v_to_station_name VARCHAR(30);
+    DECLARE v_travel_date DATE;
+    DECLARE v_status VARCHAR(20);
+    DECLARE v_fare DOUBLE;
+    DECLARE v_class_code VARCHAR(20);
+    DECLARE v_berth_preference VARCHAR(20);
+    DECLARE v_meal_preference VARCHAR(10);
+    DECLARE v_is_disabled TINYINT(1);
+    DECLARE v_chart_prepared BOOLEAN DEFAULT FALSE;
+
+    IF NOT EXISTS (SELECT 1 FROM pax_info WHERE pnr = p_pnr) THEN
+        SELECT 'PNR not found. Please check the PNR number and try again.' AS Message;
+    ELSE
+        SELECT
+            pi.name, pi.train_number, t.train_name,
+            pi.from_station_code, pi.to_station_code,
+            pi.date, pi.status, pi.fare,
+            pi.berth_preference, pi.meal_preference,
+            pi.is_disabled
+        INTO
+            v_name, v_train_number, v_train_name,
+            v_from_station, v_to_station,
+            v_travel_date, v_status, v_fare,
+            v_berth_preference, v_meal_preference,
+            v_is_disabled
+        FROM pax_info pi
+        LEFT JOIN train t ON pi.train_number = t.train_number
+        WHERE pi.pnr = p_pnr;
+
+        SELECT name INTO v_from_station_name FROM station WHERE station_code = v_from_station;
+        SELECT name INTO v_to_station_name FROM station WHERE station_code = v_to_station;
+
+        SELECT
+            CASE
+                WHEN vi.time_from_origin IS NOT NULL AND
+                     v_travel_date = CURDATE() AND
+                     TIME(vi.time_from_origin) <= ADDTIME(CURRENT_TIME(), '04:00:00')
+                THEN TRUE
+                ELSE FALSE
+            END INTO v_chart_prepared
+        FROM via_details vi
+        WHERE vi.train_number = v_train_number AND vi.station_code = v_from_station;
+
+        IF v_status LIKE 'CNF%' THEN
+            SELECT class_code INTO v_class_code
+            FROM seat
+            WHERE pnr = p_pnr;
+
+            IF v_class_code IS NULL THEN
+                SET v_class_code = CASE
+                    WHEN SUBSTRING(p_pnr, 3, 1) = '1' THEN '1A'
+                    WHEN SUBSTRING(p_pnr, 3, 1) = '2' THEN '2A'
+                    WHEN SUBSTRING(p_pnr, 3, 1) = 'S' THEN 'SL'
+                    WHEN SUBSTRING(p_pnr, 3, 1) = 'G' THEN 'GN'
+                    ELSE 'Unknown'
+                END;
+            END IF;
+        END IF;
+
+        SELECT
+            p_pnr AS 'PNR Number',
+            v_name AS 'Passenger Name',
+            v_train_number AS 'Train Number',
+            v_train_name AS 'Train Name',
+            v_from_station_name AS 'Origin Station',
+            v_to_station_name AS 'Destination Station',
+            v_travel_date AS 'Travel Date',
+            v_status AS 'Current Status',
+            CASE
+                WHEN v_status LIKE 'CNF%' THEN 'Confirmed'
+                WHEN v_status LIKE 'RAC%' THEN 'Reservation Against Cancellation'
+                WHEN v_status LIKE 'WL%' THEN 'Waitlisted'
+                ELSE 'Unknown'
+            END AS 'Status Type',
+            v_class_code AS 'Class',
+            v_fare AS 'Fare (?)',
+            v_berth_preference AS 'Berth Preference',
+            v_meal_preference AS 'Meal Preference',
+            IF(v_is_disabled = 1, 'Yes', 'No') AS 'Disabled Passenger',
+            IF(v_chart_prepared, 'Yes', 'No') AS 'Chart Prepared';
+
+        IF v_status LIKE 'CNF%' THEN
+            SELECT
+                SUBSTRING_INDEX(SUBSTRING_INDEX(v_status, '/', 2), '/', -1) AS 'Coach Number',
+                SUBSTRING_INDEX(v_status, '/', -1) AS 'Seat Number',
+                CASE
+                    WHEN CAST(SUBSTRING_INDEX(v_status, '/', -1) AS UNSIGNED) % 3 = 0 THEN 'Lower Berth'
+                    WHEN CAST(SUBSTRING_INDEX(v_status, '/', -1) AS UNSIGNED) % 3 = 1 THEN 'Middle Berth'
+                    WHEN CAST(SUBSTRING_INDEX(v_status, '/', -1) AS UNSIGNED) % 3 = 2 THEN 'Upper Berth'
+                    ELSE 'Side Berth'
+                END AS 'Berth Type';
+        END IF;
+
+        SELECT
+            pm.payment_id AS 'Payment ID',
+            pm.username AS 'Booked By',
+            pm.mode AS 'Payment Mode',
+            pm.date AS 'Booking Date'
+        FROM payment_info pm
+        WHERE pm.pnr = p_pnr;
+    END IF;
+END //
+
+DELIMITER ;
+
+
+
+----------------------------
+----TRACK TRAIN BY NUMBER---
+----------------------------
+mysql> CREATE PROCEDURE track_train_by_number(
+    ->     IN p_train_number INT,
+    ->     IN p_date DATE
+    -> )
+    -> BEGIN
+    ->     DECLARE v_train_name VARCHAR(50);
+    ->     DECLARE current_hour INT;
+    ->     DECLARE v_current_station VARCHAR(20);
+    ->
+    ->     track_train: BEGIN
+    ->         -- Get train name
+    ->         SELECT train_name INTO v_train_name
+    ->         FROM train
+    ->         WHERE train_number = p_train_number;
+    ->
+    ->         -- Check if train exists
+    ->         IF v_train_name IS NULL THEN
+    ->             SELECT 'Invalid train number. Please check and try again.' AS message;
+    ->             LEAVE track_train;
+    ->         END IF;
+    ->
+    ->         -- Display train information header
+    ->         SELECT
+    ->             CONCAT(p_train_number, ' - ', v_train_name) AS 'Train Info',
+    ->             DATE_FORMAT(p_date, '%d %b %Y') AS 'Date';
+    ->
+    ->         -- Create a temporary table to hold live train tracking data
+    ->         DROP TEMPORARY TABLE IF EXISTS temp_train_tracking;
+    ->         CREATE TEMPORARY TABLE temp_train_tracking (
+    ->             station_name VARCHAR(50),
+    ->             station_code VARCHAR(20),
+    ->             scheduled_arrival TIME,
+    ->             scheduled_departure TIME,
+    ->             actual_arrival TIME,
+    ->             actual_departure TIME,
+    ->             distance_from_origin INT,
+    ->             status VARCHAR(30),
+    ->             platform_number INT
+    ->         );
+    ->
+    ->         -- Simulate: Insert data for all stops based on via_details
+    ->         INSERT INTO temp_train_tracking (
+    ->             station_name,
+    ->             station_code,
+    ->             scheduled_arrival,
+    ->             scheduled_departure,
+    ->             distance_from_origin,
+    ->             platform_number
+    ->         )
+    ->         SELECT
+    ->             s.name AS station_name,
+    ->             v.station_code,
+    ->             -- Calculate scheduled arrival based on distance and train's average speed (60 km/h)
+    ->             -- For origin station, arrival time is NULL
+    ->             CASE WHEN v.station_code = (SELECT start_station_code FROM train WHERE train_number = p_train_number)
+    ->                  THEN NULL
+    ->                  ELSE ADDTIME(t.start_time, SEC_TO_TIME(v.dist_from_origin * 60)) END AS scheduled_arrival,
+    ->             -- Calculate scheduled departure based on arrival + 5 min halt time
+    ->             -- For destination station, departure time is NULL
+    ->             CASE WHEN v.station_code = (SELECT end_station_code FROM train WHERE train_number = p_train_number)
+    ->                  THEN NULL
+    ->                  ELSE ADDTIME(ADDTIME(t.start_time, SEC_TO_TIME(v.dist_from_origin * 60)), '00:05:00') END AS scheduled_departure,
+    ->             v.dist_from_origin,
+    ->             FLOOR(1 + RAND() * 10) AS platform_number
+    ->         FROM via_details v
+    ->         JOIN station s ON v.station_code = s.station_code
+    ->         JOIN train t ON v.train_number = t.train_number
+    ->         WHERE v.train_number = p_train_number
+    ->         ORDER BY v.dist_from_origin;
+    ->
+    ->         -- Simulation logic for train status
+    ->         IF p_date > CURDATE() THEN
+    ->             -- Future journey, no actual times yet
+    ->             UPDATE temp_train_tracking
+    ->             SET status = 'Scheduled',
+    ->                 actual_arrival = NULL,
+    ->                 actual_departure = NULL;
+    ->
+    ->         ELSEIF p_date < CURDATE() THEN
+    ->             -- Past journey, all stations have been passed
+    ->             UPDATE temp_train_tracking
+    ->             SET
+    ->                 actual_arrival = CASE
+    ->                     WHEN scheduled_arrival IS NULL THEN NULL
+    ->                     -- Random delay between -10 to +30 minutes
+    ->                     ELSE ADDTIME(scheduled_arrival, SEC_TO_TIME((FLOOR(RAND() * 40) - 10) * 60))
+    ->                 END,
+    ->                 actual_departure = CASE
+    ->                     WHEN scheduled_departure IS NULL THEN NULL
+    ->                     -- Random delay between -5 to +35 minutes
+    ->                     ELSE ADDTIME(scheduled_departure, SEC_TO_TIME((FLOOR(RAND() * 40) - 5) * 60))
+    ->                 END,
+    ->                 status = 'Completed';
+    ->
+    ->         ELSE
+    ->             -- Today's journey, update based on current time
+    ->             SET current_hour = HOUR(CURTIME());
+    ->
+    ->             -- Stations that would have been passed by now (simulated)
+    ->             UPDATE temp_train_tracking
+    ->             SET
+    ->                 actual_arrival = CASE
+    ->                     WHEN scheduled_arrival IS NULL THEN NULL
+    ->                     WHEN HOUR(scheduled_arrival) < current_hour THEN
+    ->                         ADDTIME(scheduled_arrival, SEC_TO_TIME((FLOOR(RAND() * 40) - 10) * 60))
+    ->                     ELSE NULL
+    ->                 END,
+    ->                 actual_departure = CASE
+    ->                     WHEN scheduled_departure IS NULL THEN NULL
+    ->                     WHEN HOUR(scheduled_departure) < current_hour THEN
+    ->                         ADDTIME(scheduled_departure, SEC_TO_TIME((FLOOR(RAND() * 40) - 5) * 60))
+    ->                     ELSE NULL
+    ->                 END,
+    ->                 status = CASE
+    ->                     WHEN HOUR(scheduled_arrival) < current_hour THEN 'Departed'
+    ->                     WHEN HOUR(scheduled_arrival) = current_hour THEN 'At Station'
+    ->                     ELSE 'Not Arrived'
+    ->                 END;
+    ->         END IF;
+    ->
+    ->         -- Find current station
+    ->         SELECT station_code INTO v_current_station
+    ->         FROM temp_train_tracking
+    ->         WHERE status = 'At Station'
+    ->         LIMIT 1;
+    ->
+    ->         IF v_current_station IS NULL THEN
+    ->             SELECT station_code INTO v_current_station
+    ->             FROM temp_train_tracking
+    ->             WHERE status = 'Departed'
+    ->             ORDER BY distance_from_origin DESC
+    ->             LIMIT 1;
+    ->         END IF;
+    ->
+    ->         -- Show current train location
+    ->         SELECT
+    ->             CASE
+    ->                 WHEN v_current_station IS NULL AND p_date > CURDATE() THEN 'Journey not started yet'
+    ->                 WHEN v_current_station IS NULL AND p_date <= CURDATE() THEN 'Journey completed'
+    ->                 ELSE CONCAT('Currently at/near: ',
+    ->                            (SELECT station_name FROM temp_train_tracking WHERE station_code = v_current_station),
+    ->                            ' (', v_current_station, ')')
+    ->             END AS 'Current Location';
+    ->
+    ->         -- Display detailed station-wise tracking information
+    ->         SELECT
+    ->             station_name AS 'Station',
+    ->             station_code AS 'Code',
+    ->             CASE
+    ->                 WHEN scheduled_arrival IS NULL THEN 'Origin'
+    ->                 ELSE TIME_FORMAT(scheduled_arrival, '%H:%i')
+    ->             END AS 'Scheduled Arrival',
+    ->             CASE
+    ->                 WHEN scheduled_departure IS NULL THEN 'Destination'
+    ->                 ELSE TIME_FORMAT(scheduled_departure, '%H:%i')
+    ->             END AS 'Scheduled Departure',
+    ->             CASE
+    ->                 WHEN actual_arrival IS NULL THEN '-'
+    ->                 ELSE TIME_FORMAT(actual_arrival, '%H:%i')
+    ->             END AS 'Actual Arrival',
+    ->             CASE
+    ->                 WHEN actual_departure IS NULL AND scheduled_departure IS NULL THEN '-'
+    ->                 WHEN actual_departure IS NULL THEN '-'
+    ->                 ELSE TIME_FORMAT(actual_departure, '%H:%i')
+    ->             END AS 'Actual Departure',
+    ->             CASE
+    ->                 WHEN actual_arrival IS NOT NULL AND scheduled_arrival IS NOT NULL THEN
+    ->                     calculate_train_delay(scheduled_arrival, actual_arrival)
+    ->                 ELSE '-'
+    ->             END AS 'Status',
+    ->             CONCAT('Platform ', platform_number) AS 'Platform',
+    ->             CONCAT(distance_from_origin, ' km') AS 'Distance'
+    ->         FROM temp_train_tracking
+    ->         ORDER BY distance_from_origin;
+    ->
+    ->         -- Drop temporary table
+    ->         DROP TEMPORARY TABLE IF EXISTS temp_train_tracking;
+    ->
+    ->         -- Create notification that user checked train status
+    ->         INSERT INTO notifications (username, message)
+    ->         SELECT 'system_generated',
+    ->                CONCAT('Train tracking information for Train #', p_train_number, ' on ',
+    ->                      DATE_FORMAT(p_date, '%d-%b-%Y'), ' was checked at ', NOW());
+    ->     END;
+    -> END //
+
+
+-----------------------------------
+-----AVAILABLE SEATS--------------
+----------------------------------
+DELIMITER //
+
+CREATE FUNCTION get_available_seats(
+    p_train_number INT,
+    p_class_code VARCHAR(20),
+    p_travel_date DATE
+)
+RETURNS INT
+DETERMINISTIC
+READS SQL DATA
+BEGIN
+    DECLARE v_total_seats INT;
+    DECLARE v_booked_seats INT;
+    DECLARE v_available_seats INT;
+    DECLARE v_seats_per_coach INT;
+    DECLARE v_number_of_coaches INT;
+    
+    -- Notice the change here - construct the full class_code
+    SELECT
+        number_of_coaches,
+        seats_per_coach
+    INTO
+        v_number_of_coaches,
+        v_seats_per_coach
+    FROM class
+    WHERE train_number = p_train_number
+      AND class_code = CONCAT(p_train_number, '/', p_class_code);
+    
+    -- Handle case where class or train doesn't exist
+    IF v_number_of_coaches IS NULL OR v_seats_per_coach IS NULL THEN
+        RETURN 0;
+    END IF;
+    
+    -- Calculate total seats based on class information
+    SET v_total_seats = v_number_of_coaches * v_seats_per_coach;
+    
+    -- Get count of already booked seats for this train/date/class
+    SELECT COUNT(*) INTO v_booked_seats
+    FROM pax_info
+    WHERE train_number = p_train_number
+      AND date = p_travel_date
+      AND pnr LIKE CONCAT(LEFT(p_train_number, 2), TRIM(LEFT(p_class_code, 1)), '%')
+      AND status LIKE 'CNF%';
+    
+    -- Calculate available seats
+    SET v_available_seats = v_total_seats - v_booked_seats;
+    
+    -- Return available seats (ensure non-negative)
+    RETURN GREATEST(v_available_seats, 0);
+END //
+
+DELIMITER ;
+
+-----------------------------------
+-----WAITLISTED PASSENGERS--------
+-----------------------------------
+DELIMITER //
+
+CREATE PROCEDURE get_waitlisted_passengers(
+    IN p_train_no VARCHAR(10)
+)
+BEGIN
+    SELECT
+        p.name,
+        p.gender,
+        p.age,
+        p.pnr,
+        p.from_station_code,
+        p.to_station_code,
+        p.date
+    FROM pax_info p
+    JOIN train t ON p.train_number = t.train_number
+    WHERE p.train_number = p_train_no
+      AND (p.status LIKE 'WL%');
+END //
+
+DELIMITER ;
+
+
+-----------------------------
+--TRAIN CANCELLATION REFUNDS--
+------------------------------
+CREATE FUNCTION `get_train_cancellation_refunds`(
+    p_train_number INT,
+    p_date DATE
+) RETURNS text CHARSET utf8mb4
+    READS SQL DATA
+BEGIN
+    DECLARE result TEXT DEFAULT '';
+    DECLARE done INT DEFAULT 0;
+    DECLARE v_pnr INT;
+    DECLARE v_name VARCHAR(20);
+    DECLARE v_gender CHAR(1);
+    DECLARE v_age INT;
+    DECLARE v_from_station VARCHAR(20);
+    DECLARE v_to_station VARCHAR(20);
+    DECLARE v_fare DOUBLE;
+    DECLARE v_status VARCHAR(20);
+    DECLARE v_refund_amount DOUBLE;
+    DECLARE v_payment_mode VARCHAR(50);
+    DECLARE v_payment_id INT;
+
+    DECLARE cur CURSOR FOR
+        SELECT
+            p.pnr,
+            p.name,
+            p.gender,
+            p.age,
+            p.from_station_code,
+            p.to_station_code,
+            p.fare,
+            p.status,
+            pay.amount,
+            pay.mode,
+            pay.payment_id
+        FROM
+            pax_info p
+        JOIN
+            payment_info pay ON p.payment_id = pay.payment_id
+        WHERE
+            p.train_number = p_train_number
+            AND p.date = p_date;
+
+    DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = 1;
+
+    OPEN cur;
+
+    SET result = CONCAT('TRAIN CANCELLATION: Train ', p_train_number, ' on ', DATE_FORMAT(p_date, '%Y-%m-%d'), '\n');
+    SET result = CONCAT(result, 'All passengers will receive full refunds regardless of ticket status\n');
+    SET result = CONCAT(result, '------------------------------------------------------------------------------\n');
+    SET result = CONCAT(result, 'PNR      Name             Gender  Age  From    To      Fare    Status   Refund  Payment Mode  Payment ID\n');
+    SET result = CONCAT(result, '------------------------------------------------------------------------------\n');
+
+    read_loop: LOOP
+        FETCH cur INTO v_pnr, v_name, v_gender, v_age, v_from_station, v_to_station,
+                      v_fare, v_status, v_refund_amount, v_payment_mode, v_payment_id;
+
+        IF done THEN
+            LEAVE read_loop;
+        END IF;
+
+        SET v_refund_amount = v_fare;
+
+        SET result = CONCAT(result,
+            LPAD(CAST(v_pnr AS CHAR), 8, ' '), ' ',
+            RPAD(v_name, 16, ' '), ' ',
+            RPAD(v_gender, 6, ' '), ' ',
+            LPAD(CAST(v_age AS CHAR), 3, ' '), ' ',
+            RPAD(v_from_station, 7, ' '), ' ',
+            RPAD(v_to_station, 7, ' '), ' ',
+            LPAD(CAST(v_fare AS CHAR), 7, ' '), ' ',
+            RPAD(v_status, 8, ' '), ' ',
+            LPAD(CAST(v_refund_amount AS CHAR), 6, ' '), ' ',
+            RPAD(v_payment_mode, 12, ' '), ' ',
+            v_payment_id, '\n'
+        );
+    END LOOP;
+
+    CLOSE cur;
+
+    IF result = CONCAT('TRAIN CANCELLATION: Train ', p_train_number, ' on ', DATE_FORMAT(p_date, '%Y-%m-%d'), '\n',
+                      'All passengers will receive full refunds regardless of ticket status\n',
+                      '------------------------------------------------------------------------------\n',
+                      'PNR      Name             Gender  Age  From    To      Fare    Status   Refund  Payment Mode  Payment ID\n',
+                      '------------------------------------------------------------------------------\n') THEN
+        SET result = CONCAT(result, 'No bookings found for this train and date.\n');
+    END IF;
+
+    RETURN result;
+END;
+
+DELIMITER ;
+
+
+------------------------
+-----TOTAL REVENUE------
+------------------------
+CREATE FUNCTION calculate_total_revenue`(
+    p_start_date DATE,
+    p_end_date DATE,
+    p_train_number INT
+) RETURNS double
+    READS SQL DATA
+BEGIN
+    DECLARE v_total_revenue DOUBLE DEFAULT 0;
+
+    IF p_train_number IS NULL THEN
+        SELECT COALESCE(SUM(fare), 0) INTO v_total_revenue
+        FROM pax_info
+        WHERE date BETWEEN p_start_date AND p_end_date;
+    ELSE
+        SELECT COALESCE(SUM(fare), 0) INTO v_total_revenue
+        FROM pax_info
+        WHERE date BETWEEN p_start_date AND p_end_date
+        AND train_number = p_train_number;
+    END IF;
+
+    RETURN v_total_revenue;
+END;
+
+
+----------------------
+----BUSIEST ROUTE-----
+----------------------
+mysql> CREATE PROCEDURE busiest_route (IN inputDate DATE)
+    ->
+    -> BEGIN
+    ->
+    ->     SELECT
+    ->
+    ->         pi.from_station_code,
+    ->
+    ->         pi.to_station_code,
+    ->
+    ->         pi.train_number,
+    ->
+    ->         t.train_name,
+    ->
+    ->         COUNT(*) AS passenger_count
+    ->
+    ->     FROM
+    ->
+    ->         pax_info pi
+    ->
+    ->     JOIN
+    ->
+    ->         train t ON pi.train_number = t.train_number
+    ->
+    ->     WHERE
+    ->
+    ->         pi.date = inputDate
+    ->
+    ->     GROUP BY
+    ->
+    ->         pi.from_station_code, pi.to_station_code, pi.train_number, t.train_name
+    ->
+    ->     ORDER BY
+    ->
+    ->         passenger_count DESC
+    ->
+    ->     LIMIT 1;
+    ->
+    -> END;
+    -> //
+
