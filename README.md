@@ -56,7 +56,7 @@ This project, is a comprehensive Train Reservation and Management System built u
 
 - Book Ticket: SELECT book_train_ticket("newuser", "New User", "M", 30, "2025-04-17", "NDLS", "HWH", "12301/1A", 12301, "LB", "VEG", 0); returns a PNR (e.g., 1212515249).
 
-![](book_train_tickt.jpg)
+![](book_train_ticket.jpg)
 
 - Cancel Ticket: CALL cancel_ticket(1212515842); outputs a success message with refund amount (e.g., "Ticket with PNR 1212515842 cancelled successfully. Refund amount: Rs. 2298").
 
