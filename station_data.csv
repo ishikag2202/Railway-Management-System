@@ -1,0 +1,41 @@
+station_code,name,zone_id,number_of_platforms
+NDLS,New Delhi,NR,16
+MAS,Chennai Central,SR,12
+HWH,Howrah Junction,ER,23
+BCT,Mumbai Central,WR,10
+CSTM,Chhatrapati Shivaji Terminus,CR,18
+GHY,Guwahati,NFR,7
+JP,Jaipur Junction,NWR,6
+SBC,Bengaluru City Junction,SWR,10
+VSKP,Visakhapatnam,ECoR,8
+ALD,Prayagraj Junction,NCR,10
+SC,Secunderabad Junction,SCR,10
+LKO,Lucknow NR,NR,9
+BPL,Bhopal Junction,WCR,6
+BBS,Bhubaneswar,ECoR,6
+PUNE,Pune Junction,CR,6
+ADI,Ahmedabad Junction,WR,10
+BSB,Varanasi Junction,NER,9
+KGP,Kharagpur Junction,SER,8
+JAT,Jammu Tawi,NR,3
+TPTY,Tirupati Main,SCR,5
+CDG,Chandigarh,NR,6
+PNBE,Patna Junction,ECR,10
+NJP,New Jalpaiguri,NFR,8
+RNC,Ranchi Junction,SER,4
+TVC,Thiruvananthapuram Central,SR,5
+VAPI,Vapi,WR,3
+MAO,Madgaon Junction,KR,3
+NGP,Nagpur Junction,SECR,8
+BZA,Vijayawada Junction,SCR,7
+UDZ,Udaipur City,NWR,3
+MDU,Madurai Junction,SR,5
+AJJ,Arakkonam Junction,SR,7
+BJU,Barauni Junction,ECR,5
+BSP,Bilaspur Junction,SECR,6
+DBG,Darbhanga Junction,ECR,4
+SRC,Santragachi Junction,SER,6
+ASR,Amritsar Junction,NR,6
+MYS,Mysuru Junction,SWR,4
+DHN,Dhanbad Junction,ECR,7
+KRNT,Kurnool Town,SCoR,3
