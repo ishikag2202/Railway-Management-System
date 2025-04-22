@@ -163,11 +163,20 @@ BEGIN
         );
     END WHILE;
 
-    -- Generate unique payment_id using train_number and random number
+    -- Generate a unique payment_id using train_number and a random number
+    SET v_payment_id = CONCAT(
+    p_train_number,
+    LPAD(FLOOR(RAND() * 10000), 4, '0')
+);
+
+    -- Check if the generated payment_id already exists; regenerate until unique
+    WHILE EXISTS (SELECT 1 FROM payment_info WHERE payment_id = v_payment_id) DO
     SET v_payment_id = CONCAT(
         p_train_number,
         LPAD(FLOOR(RAND() * 10000), 4, '0')
     );
+    END WHILE;
+
 
     -- Fetch class information (seats per coach and number of coaches)
     SELECT
@@ -1029,6 +1038,8 @@ DELIMITER ;
 -----------------------------
 --TRAIN CANCELLATION REFUNDS--
 ------------------------------
+DELIMITER $$
+
 CREATE FUNCTION `get_train_cancellation_refunds`(
     p_train_number INT,
     p_date DATE
@@ -1090,6 +1101,9 @@ BEGIN
 
         SET v_refund_amount = v_fare;
 
+        -- Insert refund record into refund table
+        INSERT INTO refund (pnr, amount) VALUES (v_pnr, v_refund_amount);
+
         SET result = CONCAT(result,
             LPAD(CAST(v_pnr AS CHAR), 8, ' '), ' ',
             RPAD(v_name, 16, ' '), ' ',
@@ -1116,9 +1130,10 @@ BEGIN
     END IF;
 
     RETURN result;
-END;
+END$$
 
 DELIMITER ;
+
 
 
 ------------------------
@@ -1191,4 +1206,61 @@ mysql> CREATE PROCEDURE busiest_route (IN inputDate DATE)
     ->
     -> END;
     -> //
+
+
+----------------------
+------TRIGGERS--------
+----------------------
+mysql> CREATE TRIGGER after_disabled_pnr_status_update
+    -> AFTER UPDATE ON pax_info
+    -> FOR EACH ROW
+    -> BEGIN
+    ->     -- Priority notifications for disabled passengers
+    ->     IF NEW.is_disabled = 1 AND OLD.status != NEW.status THEN
+    ->         -- Create a high-priority notification
+    ->         INSERT INTO notifications (username, message, priority)
+    ->         SELECT 'system_generated',
+    ->                CONCAT('PRIORITY: Status change for disabled passenger ', NEW.name,
+    ->                      ' with PNR ', NEW.pnr, '. New status: ', NEW.status),
+    ->                'HIGH'
+    ->         FROM dual;
+    ->
+    ->         -- Also send SMS (this would connect to an SMS gateway in a real system)
+    ->         -- This is a placeholder for where you would integrate with SMS services
+    ->         INSERT INTO sms_queue (mobile_number, message)
+    ->         SELECT u.mobile_number,
+    ->                CONCAT('Status update for your journey on ', DATE_FORMAT(NEW.date, '%d-%b-%Y'),
+    ->                      '. New status: ', NEW.status)
+    ->         FROM user u
+    ->         JOIN payment_info p ON u.username = p.username
+    ->         WHERE p.pnr = NEW.pnr;
+    ->     END IF;
+    -> END//
+Query OK, 0 rows affected (0.01 sec)
+
+mysql> DELIMITER ;
+
+--------------------------------
+
+mysql> DELIMITER //
+
+-- Create trigger for PNR status changes
+DELIMITER //
+CREATE TRIGGER after_pnr_status_update
+AFTER UPDATE ON pnr_info
+FOR EACH ROW
+BEGIN
+    -- Check if status has changed
+    IF OLD.status != NEW.status THEN
+        -- Insert notification for the user
+        INSERT INTO notifications (username, message)
+        SELECT u.username, CONCAT('Your PNR status has changed from ', OLD.status, ' to ', NEW.status)
+        FROM user u
+        JOIN payment_info p ON u.username = p.username
+        WHERE p.pnr = NEW.pnr;
+    END IF;
+END//
+DELIMITER ;
+------------------------------------
+
 
