@@ -146,7 +146,7 @@ BEGIN
     -- Get current date
     SET v_current_date = CURDATE();
 
-    -- Create a unique PNR with a class code identifier
+   -- Create a unique PNR with a class code identifier
     SET v_pnr = CONCAT(
         LEFT(p_train_number, 2),
         TRIM(LEFT(p_class_code, 1)),
@@ -154,7 +154,12 @@ BEGIN
         LPAD(FLOOR(RAND() * 1000), 3, '0')
     );
 
-    WHILE EXISTS (SELECT 1 FROM pax_info WHERE pnr = v_pnr) DO
+    -- Check uniqueness in both pax_info and refund tables
+    WHILE EXISTS (
+        SELECT 1 FROM pax_info WHERE pnr = v_pnr
+        UNION
+        SELECT 1 FROM refund WHERE pnr = v_pnr
+    ) DO
         SET v_pnr = CONCAT(
             LEFT(p_train_number, 2),
             TRIM(LEFT(p_class_code, 1)),
@@ -162,6 +167,7 @@ BEGIN
             LPAD(FLOOR(RAND() * 1000), 3, '0')
         );
     END WHILE;
+
 
     -- Generate a unique payment_id using train_number and a random number
     SET v_payment_id = CONCAT(
